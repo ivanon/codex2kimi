@@ -78,7 +78,7 @@ export class StreamTranslator {
         return [];
       case "error":
         return [this.evt("response.failed", {
-          response: { ...this.skeleton("failed"), error: { type: mapErrorType(event.error.type), message: event.error.message } },
+          response: { ...this.skeleton("failed"), output: this.outputItems, error: { type: mapErrorType(event.error.type), message: event.error.message } },
         })];
       default:
         return [];
@@ -181,15 +181,17 @@ export class StreamTranslator {
         this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
       ];
     }
-    // thinking
-    const item = { type: "reasoning", id: block.itemId, summary: [{ type: "summary_text", text: block.text }] };
-    this.outputItems.push(item);
-    return [
-      this.evt("response.reasoning_summary_text.done", {
-        item_id: block.itemId, output_index: block.outputIndex, text: block.text,
-      }),
-      this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
-    ];
+    if (block.kind === "thinking") {
+      const item = { type: "reasoning", id: block.itemId, summary: [{ type: "summary_text", text: block.text }] };
+      this.outputItems.push(item);
+      return [
+        this.evt("response.reasoning_summary_text.done", {
+          item_id: block.itemId, output_index: block.outputIndex, text: block.text,
+        }),
+        this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
+      ];
+    }
+    return [];
   }
 
   protected finalResponse() {
@@ -208,7 +210,7 @@ export class StreamTranslator {
 
   fail(message: string): ResponsesStreamEvent[] {
     return [this.evt("response.failed", {
-      response: { ...this.skeleton("failed"), error: { type: "api_error", message } },
+      response: { ...this.skeleton("failed"), output: this.outputItems, error: { type: "api_error", message } },
     })];
   }
 

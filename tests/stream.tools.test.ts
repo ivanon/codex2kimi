@@ -105,3 +105,14 @@ test("incomplete() helper emits response.incomplete for mid-stream break", () =>
   const out = t.incomplete();
   expect(out[0]!.type).toBe("response.incomplete");
 });
+
+test("error after a completed block includes accumulated output in failed response", () => {
+  const t = new StreamTranslator(OPTS);
+  t.handle(START);
+  t.handle({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+  t.handle({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } });
+  t.handle({ type: "content_block_stop", index: 0 });
+  const out = t.handle({ type: "error", error: { type: "api_error", message: "boom" } });
+  const r = (out[0] as unknown as { response: { output: unknown[] } }).response;
+  expect(r.output).toHaveLength(1);
+});
