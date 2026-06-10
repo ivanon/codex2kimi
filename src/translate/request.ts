@@ -151,7 +151,14 @@ export function translateRequest(req: ResponsesRequest, opts: TranslateOptions):
   const tools = toolChoice?.type === "none" ? undefined : mapTools(req.tools);
   if (tools) out.tools = tools;
   const thinking = mapReasoning(req.reasoning);
-  if (thinking) out.thinking = thinking;
+  if (thinking) {
+    out.thinking = thinking;
+    // Anthropic 要求 max_tokens > thinking.budget_tokens；effort=high 的 budget 可能超过默认 max_tokens
+    const MIN_OUTPUT_MARGIN = 4096;
+    if (out.max_tokens <= thinking.budget_tokens) {
+      out.max_tokens = thinking.budget_tokens + MIN_OUTPUT_MARGIN;
+    }
+  }
   const userId = req.user ?? req.metadata?.user;
   if (userId) out.metadata = { user_id: userId };
   if (req.stream !== undefined) out.stream = req.stream;

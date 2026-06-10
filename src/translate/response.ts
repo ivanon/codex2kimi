@@ -1,6 +1,5 @@
 import type {
   AnthropicResponse,
-  AnthropicStopReason,
 } from "../types/anthropic.js";
 import type {
   ResponsesOutputItem,
@@ -73,4 +72,3 @@ function mapUsage(u: AnthropicResponse["usage"]): ResponsesUsage {
   return usage;
 }
 
-export type { AnthropicStopReason };

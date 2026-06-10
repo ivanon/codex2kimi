@@ -92,3 +92,14 @@ test("maps user to metadata.user_id", () => {
 test("sets stream flag through", () => {
   expect(translateRequest(base({ stream: true }), OPTS).stream).toBe(true);
 });
+
+test("raises max_tokens above thinking budget to satisfy Anthropic", () => {
+  const out = translateRequest(base({ reasoning: { effort: "high" } }), OPTS);
+  expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
+  expect(out.max_tokens).toBeGreaterThan(16384);
+});
+
+test("does not lower an already-sufficient max_tokens for thinking", () => {
+  const out = translateRequest(base({ reasoning: { effort: "low" }, max_output_tokens: 8192 }), OPTS);
+  expect(out.max_tokens).toBe(8192); // budget 1024 < 8192, no change
+});
