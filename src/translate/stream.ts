@@ -3,6 +3,7 @@ import type {
   AnthropicResponse,
 } from "../types/anthropic.js";
 import type { ResponsesStreamEvent } from "../types/responses.js";
+import { mapErrorType } from "./error.js";
 
 export interface StreamOptions {
   model: string;
@@ -32,6 +33,7 @@ export class StreamTranslator {
     input_tokens: 0,
     output_tokens: 0,
   };
+  protected outputItems: unknown[] = [];
 
   constructor(protected opts: StreamOptions) {}
 
@@ -66,15 +68,27 @@ export class StreamTranslator {
         return this.onBlockDelta(event.index, event.delta);
       case "content_block_stop":
         return this.onBlockStop(event.index);
+      case "message_delta":
+        this.stopReason = event.delta.stop_reason;
+        if (event.usage?.output_tokens !== undefined) this.usage.output_tokens = event.usage.output_tokens;
+        return [];
+      case "message_stop":
+        return [this.evt("response.completed", { response: this.finalResponse() })];
+      case "ping":
+        return [];
+      case "error":
+        return [this.evt("response.failed", {
+          response: { ...this.skeleton("failed"), error: { type: mapErrorType(event.error.type), message: event.error.message } },
+        })];
       default:
-        return []; // tool/thinking/message_delta/message_stop/ping/error 在 Task 10 扩展
+        return [];
     }
   }
 
-  protected startBlock(index: number, block: { type: string }): ResponsesStreamEvent[] {
+  protected startBlock(index: number, block: { type: string; id?: string; name?: string }): ResponsesStreamEvent[] {
+    const itemId = `${this.responseId}-${index}`;
+    const outputIndex = this.outputIndex++;
     if (block.type === "text") {
-      const itemId = `${this.responseId}-${index}`;
-      const outputIndex = this.outputIndex++;
       this.blocks.set(index, { kind: "text", itemId, outputIndex, text: "", json: "" });
       return [
         this.evt("response.output_item.added", {
@@ -82,14 +96,33 @@ export class StreamTranslator {
           item: { type: "message", id: itemId, role: "assistant", status: "in_progress", content: [] },
         }),
         this.evt("response.content_part.added", {
-          item_id: itemId,
-          output_index: outputIndex,
-          content_index: 0,
+          item_id: itemId, output_index: outputIndex, content_index: 0,
           part: { type: "output_text", text: "", annotations: [] },
         }),
       ];
     }
-    return []; // 非 text 块在 Task 10 处理
+    if (block.type === "tool_use") {
+      this.blocks.set(index, {
+        kind: "tool_use", itemId, outputIndex, text: "", json: "",
+        toolName: block.name, toolId: block.id,
+      });
+      return [
+        this.evt("response.output_item.added", {
+          output_index: outputIndex,
+          item: { type: "function_call", id: itemId, call_id: block.id, name: block.name, arguments: "", status: "in_progress" },
+        }),
+      ];
+    }
+    if (block.type === "thinking") {
+      this.blocks.set(index, { kind: "thinking", itemId, outputIndex, text: "", json: "" });
+      return [
+        this.evt("response.output_item.added", {
+          output_index: outputIndex,
+          item: { type: "reasoning", id: itemId, summary: [] },
+        }),
+      ];
+    }
+    return [];
   }
 
   protected onBlockDelta(
@@ -100,41 +133,88 @@ export class StreamTranslator {
     if (!block) return [];
     if (block.kind === "text" && delta.type === "text_delta") {
       block.text += delta.text ?? "";
-      return [
-        this.evt("response.output_text.delta", {
-          item_id: block.itemId,
-          output_index: block.outputIndex,
-          content_index: 0,
-          delta: delta.text ?? "",
-        }),
-      ];
+      return [this.evt("response.output_text.delta", {
+        item_id: block.itemId, output_index: block.outputIndex, content_index: 0, delta: delta.text ?? "",
+      })];
     }
-    return []; // tool_use/thinking delta 在 Task 10 处理
+    if (block.kind === "tool_use" && delta.type === "input_json_delta") {
+      block.json += delta.partial_json ?? "";
+      return [this.evt("response.function_call_arguments.delta", {
+        item_id: block.itemId, output_index: block.outputIndex, delta: delta.partial_json ?? "",
+      })];
+    }
+    if (block.kind === "thinking" && delta.type === "thinking_delta") {
+      block.text += delta.thinking ?? "";
+      return [this.evt("response.reasoning_summary_text.delta", {
+        item_id: block.itemId, output_index: block.outputIndex, delta: delta.thinking ?? "",
+      })];
+    }
+    return [];
   }
 
   protected onBlockStop(index: number): ResponsesStreamEvent[] {
     const block = this.blocks.get(index);
     if (!block) return [];
     if (block.kind === "text") {
+      const item = {
+        type: "message", id: block.itemId, role: "assistant", status: "completed",
+        content: [{ type: "output_text", text: block.text, annotations: [] }],
+      };
+      this.outputItems.push(item);
       return [
         this.evt("response.output_text.done", {
-          item_id: block.itemId,
-          output_index: block.outputIndex,
-          content_index: 0,
-          text: block.text,
+          item_id: block.itemId, output_index: block.outputIndex, content_index: 0, text: block.text,
         }),
-        this.evt("response.output_item.done", {
-          output_index: block.outputIndex,
-          item: {
-            type: "message",
-            id: block.itemId,
-            role: "assistant",
-            status: "completed",
-            content: [{ type: "output_text", text: block.text, annotations: [] }],
-          },
-        }),
+        this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
       ];
     }
-    return []; // tool_use/thinking stop 在 Task 10 处理
+    if (block.kind === "tool_use") {
+      const item = {
+        type: "function_call", id: block.itemId, call_id: block.toolId, name: block.toolName,
+        arguments: block.json, status: "completed",
+      };
+      this.outputItems.push(item);
+      return [
+        this.evt("response.function_call_arguments.done", {
+          item_id: block.itemId, output_index: block.outputIndex, arguments: block.json,
+        }),
+        this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
+      ];
+    }
+    // thinking
+    const item = { type: "reasoning", id: block.itemId, summary: [{ type: "summary_text", text: block.text }] };
+    this.outputItems.push(item);
+    return [
+      this.evt("response.reasoning_summary_text.done", {
+        item_id: block.itemId, output_index: block.outputIndex, text: block.text,
+      }),
+      this.evt("response.output_item.done", { output_index: block.outputIndex, item }),
+    ];
+  }
+
+  protected finalResponse() {
+    const status = this.stopReason === "max_tokens" ? "incomplete" : "completed";
+    return {
+      ...this.skeleton(status),
+      output: this.outputItems,
+      usage: {
+        input_tokens: this.usage.input_tokens,
+        output_tokens: this.usage.output_tokens,
+        total_tokens: this.usage.input_tokens + this.usage.output_tokens,
+      },
+      incomplete_details: status === "incomplete" ? { reason: "max_output_tokens" } : null,
+    };
+  }
+
+  fail(message: string): ResponsesStreamEvent[] {
+    return [this.evt("response.failed", {
+      response: { ...this.skeleton("failed"), error: { type: "api_error", message } },
+    })];
+  }
+
+  incomplete(): ResponsesStreamEvent[] {
+    return [this.evt("response.incomplete", {
+      response: { ...this.skeleton("incomplete"), output: this.outputItems },
+    })];
   }
 }
