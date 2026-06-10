@@ -65,12 +65,23 @@ export function resolveConfig(
   };
 }
 
-export function loadConfig(): Config {
-  let file: FileConfig = {};
+export function parseFileConfig(raw: string): FileConfig {
   try {
-    file = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as FileConfig;
-  } catch {
-    file = {}; // 文件不存在则全靠环境变量/默认值
+    return JSON.parse(raw) as FileConfig;
+  } catch (err) {
+    throw new ConfigError(`配置文件 JSON 解析失败：${(err as Error).message}`);
   }
-  return resolveConfig(file, process.env);
+}
+
+export function loadConfig(): Config {
+  let raw: string;
+  try {
+    raw = readFileSync(CONFIG_PATH, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return resolveConfig({}, process.env); // 文件不存在：全靠环境变量/默认值
+    }
+    throw new ConfigError(`读取配置文件失败：${(err as Error).message}`);
+  }
+  return resolveConfig(parseFileConfig(raw), process.env);
 }

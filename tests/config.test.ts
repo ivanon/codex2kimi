@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { resolveConfig, ConfigError } from "../src/config.js";
+import { resolveConfig, parseFileConfig, ConfigError } from "../src/config.js";
 
 const FULL_ENV = { CODEX2KIMI_API_KEY: "sk-test" };
 
@@ -36,4 +36,12 @@ test("throws ConfigError on invalid port", () => {
 test("rejects non-loopback host to avoid public exposure", () => {
   const cfg = resolveConfig({ host: "0.0.0.0" }, FULL_ENV);
   expect(cfg.host).toBe("127.0.0.1");
+});
+
+test("parseFileConfig parses valid JSON", () => {
+  expect(parseFileConfig('{"port":9000}')).toEqual({ port: 9000 });
+});
+
+test("parseFileConfig throws ConfigError on malformed JSON", () => {
+  expect(() => parseFileConfig("{not json")).toThrow(ConfigError);
 });
