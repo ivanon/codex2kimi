@@ -64,6 +64,7 @@ Codex ◀──────────── Responses(JSON 或 SSE) ──┘
 | `src/config.ts` | 读配置文件 + 环境变量（见下方默认值表） | 无 |
 | `src/translate/request.ts` | 纯函数：Responses 请求 → Anthropic 请求 | types |
 | `src/translate/response.ts` | 纯函数：Anthropic 非流式响应 → Responses 响应 | types |
+| `src/translate/error.ts` | 纯函数：Anthropic 错误体 → Responses 错误体（type/状态码映射） | types |
 | `src/translate/stream.ts` | Anthropic SSE → Responses SSE，**有状态机**（维护 `response_id`/`item_id`/`output_index`/`content_index`/`sequence_number`，补全 `content_part.added`、`output_text.done` 等事件） | types, sse |
 | `src/upstream.ts` | 向 Kimi 发请求，注入伪装头，返回 JSON 或字节流 | config |
 | `src/sse.ts` | SSE 解析与序列化工具 | 无 |
@@ -90,12 +91,22 @@ Codex ◀──────────── Responses(JSON 或 SSE) ──┘
 | `tool_choice` | Anthropic `tool_choice`（见下表逆映射） |
 | `model` | 丢弃，固定填配置里的 claude 模型名 |
 | `max_output_tokens` | `max_tokens`（缺省给默认值，见配置节） |
-| `temperature` / `top_p` | 透传 |
+| `temperature` | **截断** `Math.min(t, 1)`（OpenAI 0–2，Anthropic 0–1） |
+| `top_p` | 透传 |
+| `presence_penalty` / `frequency_penalty` | Anthropic 不支持 → 丢弃 |
 | `reasoning`（effort） | 映射为 Anthropic `thinking`（effort ↔ budget_tokens 或 adaptive；`none` 则不带 thinking） |
 | `parallel_tool_calls` | 记录，并在 `response.created` 骨架中回显 |
 | `text.format`（含 json_schema） | 映射为 Anthropic 结构化输出约束（`output_format`/工具约束，联调确认 Kimi 支持度） |
 | `user` / `metadata` | 映射为 Anthropic `metadata.user_id` |
-| `truncation` / `store` / `previous_response_id` | 明确忽略（写入「已知限制」），联调确认 Codex 是否发送 |
+| `truncation` / `store` / `previous_response_id` | 忽略（见下方「会话状态」决策） |
+
+**会话状态（关键决策）：** 代理**无状态**，不托管 `previous_response_id → messages[]`。要求 Codex 每轮在 `input` 中提供完整上下文（Codex CLI 默认即如此）。若联调发现 Codex 只传 `previous_response_id` + 增量，则回退为「报错提示需完整 input」，**不**在代理内做会话缓存（超出职责、引入内存/TTL 复杂度）。
+
+**工具调用 ID 一致性：** Anthropic `tool_use.id` 与 Responses `function_call.call_id` 必须 1:1 双向保持，确保后续 `function_call_output` 能用同一 id 对应回 `tool_result.tool_use_id`。
+
+**`function_call_output` 内容：** `output` 可能是字符串或对象；对象需 `JSON.stringify` 后放入 Anthropic `tool_result` 的 `content`（字符串形态）。
+
+**图片来源处理（`input_image`）：** 优先**透传 URL**（若 Kimi 的 image source 支持 `type:"url"`）；若 Kimi 仅支持 base64，则代理 `fetch` 下载并转 `base64`（`Buffer.toString('base64')`，带 media_type）。两种支持度在联调确认，写入能力清单。
 
 **`tool_choice` 逆映射（Responses → Anthropic）：**
 
@@ -178,7 +189,17 @@ response.created
 
 - 缺 `ANTHROPIC_API_KEY` → 启动即报错 `exit 1`（避免 LaunchAgent 反复无效重启，见部署节）。
 - 输入 JSON 解析失败 / 必填字段缺失 → 返回 Responses 风格 400 错误体（`{error:{type,message,code}}`，字段以真实 Codex 期望为准，联调抓一条 golden fixture）。
-- 上游非 2xx → 把 Anthropic 错误体映射成 Responses 错误格式，透传状态码。
+- 上游非 2xx → `translate/error.ts` 把 Anthropic 错误体（`{type:"error", error:{type,message}}`）映射成 Responses 错误格式，透传状态码：
+
+  | Anthropic error.type | HTTP | Responses error.type |
+  |---|---|---|
+  | `invalid_request_error` | 400 | `invalid_request_error` |
+  | `authentication_error` | 401 | `authentication_error` |
+  | `permission_error` | 403 | `permission_error` |
+  | `rate_limit_error` | 429 | `rate_limit_error` |
+  | `api_error` / `overloaded_error` | 500/529 | `api_error` |
+
+  具体 Responses 错误字段以真实 Codex 期望为准，联调抓 golden fixture 校准。
 - 流式错误按来源分列，不一律映射为 failed：
   - 上游 4xx/5xx、JSON 解析失败 → `response.failed`。
   - 中途断流 / Codex abort → `response.incomplete`。
@@ -214,6 +235,9 @@ response.created
 | `model` | 待联调确认（一个 claude 模型名 string） | 固定填给上游 |
 | `maxTokensDefault` | `8192` | Codex 未给 `max_output_tokens` 时的 Anthropic `max_tokens` |
 | `userAgent` | `claude-cli/2.1.150 (external, cli)` | 伪装头 |
+| `logLevel` | `info` | `debug`/`info`/`error`；debug 打印请求/响应摘要（脱敏 API Key） |
+
+**不支持热更新**：改 `config.json` 后需 `launchctl kickstart -k gui/$UID/com.codex2kimi.proxy` 重启生效（不引入 `fs.watch`，避免竞态）。
 
 ## 工程与命令
 
@@ -246,9 +270,11 @@ response.created
 - 不引入 Chat Completions 中间表示层。
 - 不做多 provider/多上游路由（只对接 Kimi）。
 - 不做鉴权/多用户（本地单用户代理）。
+- 不做 CORS（Codex CLI 是本地进程调用，非浏览器）。
+- 不托管会话状态（不缓存 `previous_response_id`，见请求映射节）。
 
 ### 已知限制
 
-- `truncation` / `store` / `previous_response_id` 不实现（忽略，必要时记日志）；是否影响 Codex 待联调确认。
+- `truncation` / `store` / `previous_response_id` 不实现：代理无状态，依赖 Codex 每轮传完整 input（见请求映射节「会话状态」决策）。
 - `text.format` 结构化输出依赖 Kimi 上游支持度，联调确认。
 - v1 主力保证流式路径；非流式按 `response.ts` 表实现，best-effort。
