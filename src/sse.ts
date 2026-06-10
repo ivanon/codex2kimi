@@ -13,7 +13,6 @@ export async function* parseSSEStream(
     while (true) {
       const { value, done } = await reader.read();
       if (value) buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-      if (done) break;
       let sep: number;
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const raw = buffer.slice(0, sep);
@@ -21,6 +20,7 @@ export async function* parseSSEStream(
         const frame = parseFrame(raw);
         if (frame) yield frame;
       }
+      if (done) break;
     }
     const tail = parseFrame(buffer);
     if (tail) yield tail;

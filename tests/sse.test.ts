@@ -42,6 +42,16 @@ test("handles CRLF line endings and ignores comment lines", async () => {
   expect(frames).toEqual([{ event: "ping", data: "{}" }]);
 });
 
+test("parses multiple frames arriving in a single chunk", async () => {
+  const frames = await collect(
+    streamFromChunks(["event: a\ndata: 1\n\nevent: b\ndata: 2\n\n"]),
+  );
+  expect(frames).toEqual([
+    { event: "a", data: "1" },
+    { event: "b", data: "2" },
+  ]);
+});
+
 test("serializeSSE emits event + data + blank line", () => {
   expect(serializeSSE("response.created", { id: "r1" })).toBe(
     'event: response.created\ndata: {"id":"r1"}\n\n',
