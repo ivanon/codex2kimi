@@ -148,7 +148,7 @@ export function translateRequest(req: ResponsesRequest, opts: TranslateOptions):
   const toolChoice = mapToolChoice(req.tool_choice);
   if (toolChoice) out.tool_choice = toolChoice;
   // tool_choice=none 时不带 tools，避免部分 Anthropic 兼容端拒绝
-  const tools = req.tool_choice === "none" ? undefined : mapTools(req.tools);
+  const tools = toolChoice?.type === "none" ? undefined : mapTools(req.tools);
   if (tools) out.tools = tools;
   const thinking = mapReasoning(req.reasoning);
   if (thinking) out.thinking = thinking;
@@ -157,5 +157,7 @@ export function translateRequest(req: ResponsesRequest, opts: TranslateOptions):
   if (req.stream !== undefined) out.stream = req.stream;
   // presence_penalty / frequency_penalty：Anthropic 不支持，丢弃（不复制）
   // text.format：Kimi 支持度未确认，v1 不映射（已知限制，联调后再加）
+  // parallel_tool_calls：Anthropic 不支持，丢弃
+  // ResponsesTool.strict：Anthropic tools 无对应字段，mapTools 中已丢弃
   return out;
 }
