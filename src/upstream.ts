@@ -20,7 +20,10 @@ export async function callUpstream(
   deps: UpstreamDeps = {},
 ): Promise<UpstreamResult> {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
-  const url = new URL("v1/messages", config.anthropicBaseUrl);
+  const base = config.anthropicBaseUrl.endsWith("/")
+    ? config.anthropicBaseUrl
+    : config.anthropicBaseUrl + "/";
+  const url = new URL("v1/messages", base);
   const timeout = AbortSignal.timeout(deps.timeoutMs ?? 120000);
   const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
   const res = await fetchImpl(url, {
@@ -39,7 +42,7 @@ export async function callUpstream(
 
   if (!res.ok) {
     const body = contentType.includes("application/json")
-      ? await res.json().catch(() => null)
+      ? await res.json().catch(() => res.text().catch(() => ""))
       : await res.text().catch(() => "");
     return { kind: "error", status: res.status, body };
   }

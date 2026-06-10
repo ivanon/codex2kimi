@@ -51,3 +51,13 @@ test("returns error result for non-2xx", async () => {
   const res = await callUpstream(REQ, CONFIG, { fetchImpl });
   expect(res).toMatchObject({ kind: "error", status: 401 });
 });
+
+test("normalizes base url without trailing slash (keeps path segment)", async () => {
+  let capturedUrl = "";
+  const fetchImpl = async (url: string | URL) => {
+    capturedUrl = String(url);
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  await callUpstream(REQ, { ...CONFIG, anthropicBaseUrl: "https://api.kimi.com/coding" }, { fetchImpl });
+  expect(capturedUrl).toBe("https://api.kimi.com/coding/v1/messages");
+});
