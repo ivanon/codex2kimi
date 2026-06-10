@@ -109,6 +109,32 @@ test("stream request pipes translated SSE with created and completed", async () 
   expect(text).toContain("event: response.completed");
 });
 
+test("cancelling the response stream aborts upstream via onCancel", async () => {
+  let aborted = false;
+  const neverEndingFetch = ((url: string | URL, init?: RequestInit) => {
+    init?.signal?.addEventListener("abort", () => { aborted = true; });
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(
+              new TextEncoder().encode(
+                'event: message_start\ndata: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"claude-x","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+              ),
+            );
+            // never closes
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+    );
+  }) as unknown as typeof fetch;
+  const app = createApp(CONFIG, { fetchImpl: neverEndingFetch, now: () => 1000 });
+  const res = await post(app, { ...REQ, stream: true });
+  await res.body!.cancel();
+  expect(aborted).toBe(true);
+});
+
 test("mid-stream abort yields response.incomplete (not failed)", async () => {
   const head =
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n';

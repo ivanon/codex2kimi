@@ -24,6 +24,7 @@ function errMessage(err: unknown): string {
 export function pumpStream(
   upstream: ReadableStream<Uint8Array>,
   translator: StreamTranslator,
+  onCancel?: () => void,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
@@ -44,6 +45,9 @@ export function pumpStream(
       } finally {
         controller.close();
       }
+    },
+    cancel() {
+      onCancel?.();
     },
   });
 }
@@ -79,9 +83,13 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
       return c.json(errBody, status as ContentfulStatusCode);
     }
 
+    const ac = new AbortController();
+    const clientSignal = c.req.raw.signal;
+    if (clientSignal) clientSignal.addEventListener("abort", () => ac.abort(), { once: true });
+
     const upstream = await callUpstream(anthropicReq, config, {
       fetchImpl: deps.fetchImpl,
-      signal: c.req.raw.signal,
+      signal: ac.signal,
     });
 
     if (upstream.kind === "error") {
@@ -102,7 +110,7 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
         createdAt: now(),
         parallelToolCalls: body.parallel_tool_calls ?? true,
       });
-      const rs = pumpStream(upstream.stream, translator);
+      const rs = pumpStream(upstream.stream, translator, () => ac.abort());
       return new Response(rs, {
         headers: {
           "content-type": "text/event-stream; charset=utf-8",
@@ -135,12 +143,12 @@ function main(): void {
   const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
     console.log(`codex2kimi listening on http://${config.host}:${info.port}`);
   });
-  process.on("SIGTERM", () => {
-    server.close(() => process.exit(0));
-  });
+  const shutdown = () => server.close(() => process.exit(0));
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
-if (process.argv[1] && process.argv[1].endsWith("server.js")) {
+if (process.argv[1] && /server\.[jt]s$/.test(process.argv[1])) {
   try {
     main();
   } catch (err) {
