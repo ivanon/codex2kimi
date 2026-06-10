@@ -34,8 +34,8 @@ export function buildMessages(input: ResponsesInputItem[]): AnthropicMessage[] {
   for (const item of input) {
     if (item.type === "message") {
       if (item.role === "system" || item.role === "developer") continue; // 走 system
-      const role = item.role; // "user" | "assistant"
-      messages.push({ role, content: userPartsToBlocks(item.content) });
+      const blocks = userPartsToBlocks(item.content);
+      if (blocks.length > 0) messages.push({ role: item.role, content: blocks });
     } else if (item.type === "function_call") {
       messages.push({
         role: "assistant",
@@ -56,6 +56,8 @@ export function buildMessages(input: ResponsesInputItem[]): AnthropicMessage[] {
   return mergeAdjacentSameRole(messages);
 }
 
+// Anthropic tool_use.input 必须是对象；arguments 非法时以空对象兜底（有意的防御策略，
+// 上游正常情况下保证 arguments 是合法 JSON）
 function parseArgs(args: string): Record<string, unknown> {
   try {
     return args ? (JSON.parse(args) as Record<string, unknown>) : {};
