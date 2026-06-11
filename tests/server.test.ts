@@ -183,6 +183,29 @@ test("malformed upstream json yields 502 api_error", async () => {
   expect((await res.json()) as { error: { type: string } }).toMatchObject({ error: { type: "api_error" } });
 });
 
+test("upstream fetch failure returns 502 api_error JSON", async () => {
+  const failFetch = (() => Promise.reject(new Error("ECONNRESET"))) as unknown as typeof fetch;
+  const app = createApp(CONFIG, { fetchImpl: failFetch, now: () => 1000 });
+  const res = await post(app, REQ);
+  expect(res.status).toBe(502);
+  expect(res.headers.get("content-type")).toContain("application/json");
+  expect((await res.json()) as { error: { type: string } }).toMatchObject({ error: { type: "api_error" } });
+});
+
+test("malformed input item returns 400 invalid_request_error (not 500)", async () => {
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch({}), now: () => 1000 });
+  // message without content → translateRequest throws (userPartsToBlocks iterates undefined) → caught → 400
+  const res = await post(app, { model: "gpt-5-codex", input: [{ type: "message", role: "user" }] });
+  expect(res.status).toBe(400);
+  expect((await res.json()) as { error: { type: string } }).toMatchObject({ error: { type: "invalid_request_error" } });
+});
+
+test("non-loopback Host header is rejected with 403", async () => {
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch({}), now: () => 1000 });
+  const res = await app.request("/health", { headers: { host: "evil.example.com" } });
+  expect(res.status).toBe(403);
+});
+
 test("mid-stream abort yields response.incomplete (not failed)", async () => {
   const head =
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n';

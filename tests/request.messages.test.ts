@@ -67,6 +67,10 @@ test("message with empty content is skipped (avoids Anthropic 400)", () => {
   expect(buildMessages([{ type: "message", role: "user", content: [] }])).toEqual([]);
 });
 
+test("empty string content message is skipped (no empty text block)", () => {
+  expect(buildMessages([{ type: "message", role: "user", content: "" }])).toEqual([]);
+});
+
 test("mergeAdjacentSameRole merges consecutive same-role messages", () => {
   const merged = mergeAdjacentSameRole([
     { role: "user", content: [{ type: "tool_result", tool_use_id: "c", content: "r" }] },
