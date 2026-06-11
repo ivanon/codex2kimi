@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { resolveConfig, parseFileConfig, ConfigError } from "../src/config.js";
+import { resolveConfig, parseFileConfig, isInsecureMode, ConfigError } from "../src/config.js";
 
 const FULL_ENV = { CODEX2KIMI_API_KEY: "sk-test" };
 
@@ -44,4 +44,12 @@ test("parseFileConfig parses valid JSON", () => {
 
 test("parseFileConfig throws ConfigError on malformed JSON", () => {
   expect(() => parseFileConfig("{not json")).toThrow(ConfigError);
+});
+
+test("isInsecureMode flags group/other access, accepts owner-only", () => {
+  expect(isInsecureMode(0o600)).toBe(false);
+  expect(isInsecureMode(0o700)).toBe(false);
+  expect(isInsecureMode(0o644)).toBe(true);
+  expect(isInsecureMode(0o640)).toBe(true);
+  expect(isInsecureMode(0o604)).toBe(true);
 });
