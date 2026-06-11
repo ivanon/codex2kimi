@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { translateResponse } from "../src/translate/response.js";
 import type { AnthropicResponse } from "../src/types/anthropic.js";
 
-const OPTS = { model: "gpt-5-codex", createdAt: 1000 };
+const OPTS = { model: "gpt-5-codex", createdAt: 1000, parallelToolCalls: true };
 
 function resp(overrides: Partial<AnthropicResponse>): AnthropicResponse {
   return {
@@ -85,4 +85,11 @@ test("cache read tokens surfaced in usage details", () => {
     OPTS,
   );
   expect(out.usage?.input_tokens_details).toEqual({ cached_tokens: 4 });
+});
+
+test("echoes parallel_tool_calls from options", () => {
+  const out = translateResponse(resp({ content: [{ type: "text", text: "x" }] }), {
+    model: "gpt-5-codex", createdAt: 1000, parallelToolCalls: false,
+  });
+  expect(out.parallel_tool_calls).toBe(false);
 });

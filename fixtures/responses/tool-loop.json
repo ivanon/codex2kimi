@@ -1,0 +1,8 @@
+{
+  "model": "gpt-5-codex",
+  "input": [
+    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "weather in SF?" }] },
+    { "type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": "{\"city\":\"SF\"}" },
+    { "type": "function_call_output", "call_id": "call_1", "output": "{\"temp\":20}" }
+  ]
+}

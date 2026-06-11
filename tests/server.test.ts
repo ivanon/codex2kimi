@@ -49,6 +49,17 @@ test("non-stream request returns translated Responses JSON echoing codex model",
   expect(json.status).toBe("completed");
 });
 
+test("previous_response_id with non-empty input still passes through (normal case)", async () => {
+  const anthropic = {
+    id: "msg_1", type: "message", role: "assistant", model: "claude-x",
+    content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", stop_sequence: null,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch(anthropic), now: () => 1000 });
+  const res = await post(app, { ...REQ, previous_response_id: "resp_prev" });
+  expect(res.status).toBe(200);
+});
+
 test("missing input returns 400 invalid_request_error", async () => {
   const app = createApp(CONFIG, { fetchImpl: jsonFetch({}), now: () => 1000 });
   const res = await post(app, { model: "gpt-5-codex" });
@@ -133,6 +144,43 @@ test("cancelling the response stream aborts upstream via onCancel", async () => 
   const res = await post(app, { ...REQ, stream: true });
   await res.body!.cancel();
   expect(aborted).toBe(true);
+});
+
+test("previous_response_id with empty input returns 400", async () => {
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch({}), now: () => 1000 });
+  const res = await app.request("/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5-codex", input: [], previous_response_id: "resp_prev" }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json()) as { error: { type: string } }).toMatchObject({
+    error: { type: "invalid_request_error" },
+  });
+});
+
+test("non-stream echoes parallel_tool_calls=false from request", async () => {
+  const anthropic = {
+    id: "msg_1", type: "message", role: "assistant", model: "claude-x",
+    content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", stop_sequence: null,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch(anthropic), now: () => 1000 });
+  const res = await app.request("/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...REQ, parallel_tool_calls: false }),
+  });
+  const json = (await res.json()) as { parallel_tool_calls: boolean };
+  expect(json.parallel_tool_calls).toBe(false);
+});
+
+test("malformed upstream json yields 502 api_error", async () => {
+  // content not an array → translateResponse throws → caught → 502
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch({ id: "x", content: "oops" }), now: () => 1000 });
+  const res = await post(app, REQ);
+  expect(res.status).toBe(502);
+  expect((await res.json()) as { error: { type: string } }).toMatchObject({ error: { type: "api_error" } });
 });
 
 test("mid-stream abort yields response.incomplete (not failed)", async () => {
