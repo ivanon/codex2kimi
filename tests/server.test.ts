@@ -206,6 +206,23 @@ test("non-loopback Host header is rejected with 403", async () => {
   expect(res.status).toBe(403);
 });
 
+test("logs response info via injected logger", async () => {
+  const calls: { level: string; msg: string; fields?: Record<string, unknown> }[] = [];
+  const logger = {
+    debug: (msg: string, fields?: Record<string, unknown>) => calls.push({ level: "debug", msg, fields }),
+    info: (msg: string, fields?: Record<string, unknown>) => calls.push({ level: "info", msg, fields }),
+    error: (msg: string, fields?: Record<string, unknown>) => calls.push({ level: "error", msg, fields }),
+  };
+  const anthropic = {
+    id: "msg_1", type: "message", role: "assistant", model: "claude-x",
+    content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", stop_sequence: null,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch(anthropic), now: () => 1000, logger });
+  await post(app, REQ);
+  expect(calls.some((c) => c.level === "info" && c.msg === "response")).toBe(true);
+});
+
 test("mid-stream abort yields response.incomplete (not failed)", async () => {
   const head =
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n';

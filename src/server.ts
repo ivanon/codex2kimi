@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { serve } from "@hono/node-server";
 import { loadConfig, type Config } from "./config.js";
+import { createLogger, type Logger } from "./logger.js";
 import { parseSSEStream, serializeSSE } from "./sse.js";
 import { translateRequest } from "./translate/request.js";
 import { translateResponse } from "./translate/response.js";
@@ -15,6 +16,7 @@ import { VERSION } from "./version.js";
 export interface ServerDeps {
   fetchImpl?: FetchImpl;
   now?: () => number;
+  logger?: Logger;
 }
 
 function errMessage(err: unknown): string {
@@ -55,6 +57,7 @@ export function pumpStream(
 
 export function createApp(config: Config, deps: ServerDeps = {}) {
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
+  const logger = deps.logger ?? createLogger(config.logLevel);
   const app = new Hono();
 
   app.onError((err, c) =>
@@ -115,6 +118,7 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
       return c.json(errBody, status as ContentfulStatusCode);
     }
 
+    logger.debug("request", { model: body.model, stream: Boolean(body.stream), items: body.input.length });
     const ac = new AbortController();
     const clientSignal = c.req.raw.signal;
     if (clientSignal?.aborted) ac.abort();
@@ -127,6 +131,7 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
         signal: ac.signal,
       });
     } catch (err) {
+      logger.error("upstream_failed", { message: errMessage(err) });
       const { status, body: errBody } = translateError(
         { error: { type: "api_error", message: `upstream request failed: ${errMessage(err)}` } },
         502,
@@ -153,6 +158,7 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
         parallelToolCalls: body.parallel_tool_calls ?? true,
       });
       const rs = pumpStream(upstream.stream, translator, () => ac.abort());
+      logger.info("response", { model: body.model, stream: true });
       return new Response(rs, {
         headers: {
           "content-type": "text/event-stream; charset=utf-8",
@@ -176,8 +182,10 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
         createdAt: now(),
         parallelToolCalls: body.parallel_tool_calls ?? true,
       });
+      logger.info("response", { model: body.model, stream: false, status: responsesBody.status });
       return c.json(responsesBody);
     } catch (err) {
+      logger.error("translate_failed", { message: errMessage(err) });
       const { status, body: errBody } = translateError(
         { error: { type: "api_error", message: `failed to translate upstream response: ${errMessage(err)}` } },
         502,

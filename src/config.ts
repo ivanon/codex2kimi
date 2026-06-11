@@ -1,8 +1,12 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 export class ConfigError extends Error {}
+
+export function isInsecureMode(mode: number): boolean {
+  return (mode & 0o077) !== 0; // any group/other permission bit set
+}
 
 export interface Config {
   host: string;
@@ -82,6 +86,13 @@ export function loadConfig(): Config {
       return resolveConfig({}, process.env); // 文件不存在：全靠环境变量/默认值
     }
     throw new ConfigError(`读取配置文件失败：${(err as Error).message}`);
+  }
+  try {
+    if (isInsecureMode(statSync(CONFIG_PATH).mode)) {
+      console.warn(`警告：${CONFIG_PATH} 权限过宽，建议 chmod 600（否则可能泄露 API Key）`);
+    }
+  } catch {
+    // stat 失败忽略，不阻塞启动
   }
   return resolveConfig(parseFileConfig(raw), process.env);
 }
