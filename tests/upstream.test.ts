@@ -61,3 +61,31 @@ test("normalizes base url without trailing slash (keeps path segment)", async ()
   await callUpstream(REQ, { ...CONFIG, anthropicBaseUrl: "https://api.kimi.com/coding" }, { fetchImpl });
   expect(capturedUrl).toBe("https://api.kimi.com/coding/v1/messages");
 });
+
+test("connect timeout rejects when fetch never resolves", async () => {
+  const fetchImpl = ((_url: string | URL, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as unknown as typeof fetch;
+  await expect(callUpstream(REQ, CONFIG, { fetchImpl, timeoutMs: 20 })).rejects.toBeTruthy();
+});
+
+test("connect timeout does not cut a slow streaming body after headers", async () => {
+  const body = new ReadableStream<Uint8Array>({
+    async start(c) {
+      await new Promise((r) => setTimeout(r, 40)); // > timeoutMs
+      c.enqueue(new TextEncoder().encode("event: ping\ndata: {}\n\n"));
+      c.close();
+    },
+  });
+  const fetchImpl = (async () =>
+    new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
+  const res = await callUpstream({ ...REQ, stream: true }, CONFIG, { fetchImpl, timeoutMs: 20 });
+  expect(res.kind).toBe("stream");
+  const stream = (res as { stream: ReadableStream<Uint8Array> }).stream;
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  let text = "";
+  for (;;) { const { value, done } = await reader.read(); if (value) text += dec.decode(value); if (done) break; }
+  expect(text).toContain("ping");
+});

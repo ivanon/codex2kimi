@@ -24,19 +24,28 @@ export async function callUpstream(
     ? config.anthropicBaseUrl
     : config.anthropicBaseUrl + "/";
   const url = new URL("v1/messages", base);
-  const timeout = AbortSignal.timeout(deps.timeoutMs ?? 120000);
-  const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
-  const res = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": config.anthropicApiKey,
-      "anthropic-version": "2023-06-01",
-      "user-agent": config.userAgent,
-    },
-    body: JSON.stringify(req),
-    signal,
-  });
+  const connect = new AbortController();
+  const timer = setTimeout(
+    () => connect.abort(new DOMException("upstream connect timeout", "TimeoutError")),
+    deps.timeoutMs ?? 120000,
+  );
+  const signal = deps.signal ? AbortSignal.any([deps.signal, connect.signal]) : connect.signal;
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": config.anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+        "user-agent": config.userAgent,
+      },
+      body: JSON.stringify(req),
+      signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const contentType = res.headers.get("content-type") ?? "";
 
