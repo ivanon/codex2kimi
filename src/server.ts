@@ -71,6 +71,13 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
       return c.json(errBody, status as ContentfulStatusCode);
     }
 
+    if (body.previous_response_id && body.input.length === 0) {
+      const { status, body: errBody } = badRequest(
+        "previous_response_id requires full input; this proxy is stateless",
+      );
+      return c.json(errBody, status as ContentfulStatusCode);
+    }
+
     const anthropicReq = translateRequest(body, {
       model: config.model,
       maxTokensDefault: config.maxTokensDefault,
@@ -127,11 +134,20 @@ export function createApp(config: Config, deps: ServerDeps = {}) {
       );
       return c.json(errBody, status as ContentfulStatusCode);
     }
-    const responsesBody = translateResponse(upstream.body as never, {
-      model: body.model,
-      createdAt: now(),
-    });
-    return c.json(responsesBody);
+    try {
+      const responsesBody = translateResponse(upstream.body as never, {
+        model: body.model,
+        createdAt: now(),
+        parallelToolCalls: body.parallel_tool_calls ?? true,
+      });
+      return c.json(responsesBody);
+    } catch (err) {
+      const { status, body: errBody } = translateError(
+        { error: { type: "api_error", message: `failed to translate upstream response: ${errMessage(err)}` } },
+        502,
+      );
+      return c.json(errBody, status as ContentfulStatusCode);
+    }
   });
 
   return app;

@@ -10,6 +10,7 @@ import type {
 export interface ResponseOptions {
   model: string;
   createdAt: number;
+  parallelToolCalls: boolean;
 }
 
 export function translateResponse(
@@ -53,7 +54,7 @@ export function translateResponse(
     status: incomplete ? "incomplete" : "completed",
     model: opts.model,
     output,
-    parallel_tool_calls: true,
+    parallel_tool_calls: opts.parallelToolCalls,
     incomplete_details: incomplete ? { reason: "max_output_tokens" } : null,
     usage: mapUsage(resp.usage),
     error: null,
