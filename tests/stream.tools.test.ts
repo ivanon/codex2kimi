@@ -75,14 +75,16 @@ test("message_stop emits response.completed with output and usage", () => {
   expect(completed.response.usage.total_tokens).toBe(10);
 });
 
-test("max_tokens stop_reason completes as incomplete", () => {
+test("max_tokens stop_reason emits response.incomplete event", () => {
   const out = run([
     START,
     { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 1 } },
     { type: "message_stop" },
   ]);
-  const completed = out.find((e) => e.type === "response.completed") as unknown as { response: { status: string } };
-  expect(completed.response.status).toBe("incomplete");
+  const ev = out.find((e) => e.type === "response.incomplete") as unknown as { response: { status: string } };
+  expect(ev).toBeTruthy();
+  expect(ev.response.status).toBe("incomplete");
+  expect(out.find((e) => e.type === "response.completed")).toBeUndefined();
 });
 
 test("ping is swallowed", () => {
@@ -104,6 +106,16 @@ test("incomplete() helper emits response.incomplete for mid-stream break", () =>
   t.handle(START);
   const out = t.incomplete();
   expect(out[0]!.type).toBe("response.incomplete");
+});
+
+test("unknown content block type does not consume an output_index", () => {
+  const out = run([
+    START,
+    { type: "content_block_start", index: 0, content_block: { type: "redacted_thinking" } as never },
+    { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+  ]);
+  const added = out.find((e) => e.type === "response.output_item.added") as unknown as { output_index: number };
+  expect(added.output_index).toBe(0); // text block got index 0, not 1
 });
 
 test("error after a completed block includes accumulated output in failed response", () => {

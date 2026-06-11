@@ -103,3 +103,9 @@ test("does not lower an already-sufficient max_tokens for thinking", () => {
   const out = translateRequest(base({ reasoning: { effort: "low" }, max_output_tokens: 8192 }), OPTS);
   expect(out.max_tokens).toBe(8192); // budget 1024 < 8192, no change
 });
+
+test("malformed tool_choice object falls back to auto", () => {
+  // simulate an unexpected runtime shape
+  const out = translateRequest(base({ tool_choice: { type: "function" } as never }), OPTS);
+  expect(out.tool_choice).toEqual({ type: "auto" });
+});

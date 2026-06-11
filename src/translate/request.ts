@@ -23,11 +23,11 @@ export function inputImageToBlock(imageUrl: string): AnthropicImageBlock {
 }
 
 function userPartsToBlocks(content: ResponsesContentPart[] | string): AnthropicContentBlock[] {
-  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (typeof content === "string") return content ? [{ type: "text", text: content }] : [];
   const blocks: AnthropicContentBlock[] = [];
   for (const part of content) {
     if (part.type === "input_text" || part.type === "output_text") {
-      blocks.push({ type: "text", text: part.text });
+      if (part.text) blocks.push({ type: "text", text: part.text });
     } else if (part.type === "input_image") {
       blocks.push(inputImageToBlock(part.image_url));
     }
@@ -124,7 +124,10 @@ export function mapToolChoice(tc?: ResponsesToolChoice): AnthropicToolChoice | u
   if (tc === "auto") return { type: "auto" };
   if (tc === "required") return { type: "any" };
   if (tc === "none") return { type: "none" };
-  return { type: "tool", name: tc.name };
+  if (typeof tc === "object" && tc.type === "function" && typeof tc.name === "string") {
+    return { type: "tool", name: tc.name };
+  }
+  return { type: "auto" }; // 未知形态退回 auto，避免上游 400
 }
 
 export function mapReasoning(

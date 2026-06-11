@@ -72,8 +72,11 @@ export class StreamTranslator {
         this.stopReason = event.delta.stop_reason;
         if (event.usage?.output_tokens !== undefined) this.usage.output_tokens = event.usage.output_tokens;
         return [];
-      case "message_stop":
-        return [this.evt("response.completed", { response: this.finalResponse() })];
+      case "message_stop": {
+        const response = this.finalResponse();
+        const type = response.status === "incomplete" ? "response.incomplete" : "response.completed";
+        return [this.evt(type, { response })];
+      }
       case "ping":
         return [];
       case "error":
@@ -87,8 +90,8 @@ export class StreamTranslator {
 
   protected startBlock(index: number, block: { type: string; id?: string; name?: string }): ResponsesStreamEvent[] {
     const itemId = `${this.responseId}-${index}`;
-    const outputIndex = this.outputIndex++;
     if (block.type === "text") {
+      const outputIndex = this.outputIndex++;
       this.blocks.set(index, { kind: "text", itemId, outputIndex, text: "", json: "" });
       return [
         this.evt("response.output_item.added", {
@@ -102,6 +105,7 @@ export class StreamTranslator {
       ];
     }
     if (block.type === "tool_use") {
+      const outputIndex = this.outputIndex++;
       this.blocks.set(index, {
         kind: "tool_use", itemId, outputIndex, text: "", json: "",
         toolName: block.name, toolId: block.id,
@@ -114,6 +118,7 @@ export class StreamTranslator {
       ];
     }
     if (block.type === "thinking") {
+      const outputIndex = this.outputIndex++;
       this.blocks.set(index, { kind: "thinking", itemId, outputIndex, text: "", json: "" });
       return [
         this.evt("response.output_item.added", {
