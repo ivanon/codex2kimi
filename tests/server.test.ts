@@ -49,6 +49,17 @@ test("non-stream request returns translated Responses JSON echoing codex model",
   expect(json.status).toBe("completed");
 });
 
+test("previous_response_id with non-empty input still passes through (normal case)", async () => {
+  const anthropic = {
+    id: "msg_1", type: "message", role: "assistant", model: "claude-x",
+    content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", stop_sequence: null,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const app = createApp(CONFIG, { fetchImpl: jsonFetch(anthropic), now: () => 1000 });
+  const res = await post(app, { ...REQ, previous_response_id: "resp_prev" });
+  expect(res.status).toBe(200);
+});
+
 test("missing input returns 400 invalid_request_error", async () => {
   const app = createApp(CONFIG, { fetchImpl: jsonFetch({}), now: () => 1000 });
   const res = await post(app, { model: "gpt-5-codex" });
